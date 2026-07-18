@@ -43,11 +43,17 @@ app.post('/api/create-order', async (req, res) => {
 
     let calculatedTotal = 0;
 
-    // STEP A: SERVER-SIDE PRICE VALIDATION
+   // STEP A: SERVER-SIDE PRICE VALIDATION
     for (let item of cartItems) {
         if (!item.id) {
             console.log("⚠️ Warning: Item missing ID in payload, skipping...");
             continue;
+        }
+
+        // 🚨 SECURITY FIX: BLOCK QUANTITY HACKS (NEGATIVE OR ZERO QTY) 🚨
+        if (item.qty < 1 || isNaN(item.qty)) {
+            console.log(`❌ Hacker alert: Invalid quantity ${item.qty} detected for product ${item.id}`);
+            return res.status(400).json({ success: false, error: "Invalid product quantity detected." });
         }
 
         const productDoc = await db.collection('products').doc(item.id).get();
@@ -72,7 +78,6 @@ app.post('/api/create-order', async (req, res) => {
     }
 
     console.log(`💰 Calculated Base Total from DB: ₹${calculatedTotal}`);
-
     // STEP B: POINTS VALIDATION
     let discountRupees = 0;
     let actualPointsUsed = 0;
