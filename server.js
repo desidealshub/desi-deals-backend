@@ -155,8 +155,8 @@ app.post('/api/admin/send-offer', async (req, res) => {
         };
         
         // Agar image hai toh usse notification object mein daalo
-        if (image) {
-            message.notification.image = image;
+        if (imageURL) {
+            message.notification.imageURL = imageURL;
         }
 
         // PURANE sendMulticast ki jagah sendEachForMulticast use karo
