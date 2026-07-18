@@ -131,7 +131,7 @@ app.post('/api/create-order', async (req, res) => {
   }
 });
 
-// --- 4. MARKETING PUSH NOTIFICATION API ---
+// --- 4. MARKETING PUSH NOTIFICATION API (FIXED FOR v12+) ---
 app.post('/api/admin/send-offer', async (req, res) => {
     try {
         const { title, body, imageUrl } = req.body;
@@ -148,13 +148,20 @@ app.post('/api/admin/send-offer', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Database mein koi token nahi hai.' });
         }
 
+        // NAYA TARIKA: Message array banao
         const message = {
             notification: { title, body },
             tokens: tokens
         };
-        if (imageUrl) message.notification.image = imageUrl;
+        
+        // Agar image hai toh usse notification object mein daalo
+        if (imageUrl) {
+            message.notification.imageUrl = imageUrl;
+        }
 
-        const response = await admin.messaging().sendMulticast(message);
+        // PURANE sendMulticast ki jagah sendEachForMulticast use karo
+        const response = await admin.messaging().sendEachForMulticast(message);
+        
         console.log(`✅ Push Sent! Success: ${response.successCount}, Failed: ${response.failureCount}`);
         res.json({ success: true, message: `Notification sent to ${response.successCount} users.` });
 
@@ -163,7 +170,6 @@ app.post('/api/admin/send-offer', async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
-
 // YEH HAMESHA FILE KE SABSE AAKHIR MEIN RAHEGA
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
