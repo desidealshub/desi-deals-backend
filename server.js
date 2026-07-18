@@ -3,17 +3,22 @@ const Razorpay = require('razorpay');
 const cors = require('cors');
 const admin = require('firebase-admin');
 
-// 1. FIREBASE SECURE CONNECTION
-if (!process.env.FIREBASE_CREDENTIALS) {
-    console.error("FATAL ERROR: FIREBASE_CREDENTIALS is missing in Render!");
-} else {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-    });
+// 1. FIREBASE SECURE CONNECTION (WITH ERROR HANDLING)
+try {
+    if (!process.env.FIREBASE_CREDENTIALS) {
+        console.error("🚨 FATAL ERROR: FIREBASE_CREDENTIALS environment variable is missing in Render!");
+    } else {
+        const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount)
+        });
+        console.log("✅ Firebase Admin Connected Successfully!");
+    }
+} catch (err) {
+    console.error("🚨 Firebase Init Error. Check your JSON formatting in Render Environment Variables:", err);
 }
-const db = admin.firestore();
 
+const db = admin.firestore();
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -26,10 +31,13 @@ const razorpay = new Razorpay({
 
 // 3. MASTER SECURE API
 app.post('/api/create-order', async (req, res) => {
+  console.log("📦 NEW ORDER REQUEST RECEIVED:", JSON.stringify(req.body)); // Payload check
+
   try {
     const { cartItems, userEmail, pointsToUse } = req.body; 
 
-    if (!cartItems || cartItems.length === 0) {
+    if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
+        console.log("❌ Error: Cart is empty or invalid format.");
         return res.status(400).json({ success: false, error: "Cart is empty" });
     }
 
@@ -37,18 +45,33 @@ app.post('/api/create-order', async (req, res) => {
 
     // STEP A: SERVER-SIDE PRICE VALIDATION
     for (let item of cartItems) {
+        if (!item.id) {
+            console.log("⚠️ Warning: Item missing ID in payload, skipping...");
+            continue;
+        }
+
         const productDoc = await db.collection('products').doc(item.id).get();
-        if (!productDoc.exists) continue; 
+        
+        if (!productDoc.exists) {
+            console.log(`❌ Error: Product ID ${item.id} not found in database!`);
+            continue; 
+        }
 
         const productData = productDoc.data();
         let itemPrice = productData.price;
 
         if (item.selectedSize && productData.sizesData) {
             const sizeObj = productData.sizesData.find(s => s.size === item.selectedSize);
-            if (sizeObj) itemPrice = sizeObj.price;
+            if (sizeObj) {
+                itemPrice = sizeObj.price;
+            } else {
+                console.log(`⚠️ Warning: Size ${item.selectedSize} not found for product ${item.id}. Using default price.`);
+            }
         }
-        calculatedTotal += (itemPrice * item.qty);
+        calculatedTotal += (itemPrice * (item.qty || 1));
     }
+
+    console.log(`💰 Calculated Base Total from DB: ₹${calculatedTotal}`);
 
     // STEP B: POINTS VALIDATION
     let discountRupees = 0;
@@ -64,24 +87,30 @@ app.post('/api/create-order', async (req, res) => {
             if (userPoints >= pointsToUse) {
                  actualPointsUsed = Math.min(pointsToUse, maxPointsAllowed);
                  discountRupees = Math.floor(actualPointsUsed * 0.02);
+                 console.log(`🎁 Discount Applied: -₹${discountRupees} (${actualPointsUsed} points)`);
+            } else {
+                 console.log("⚠️ Warning: User tried to use more points than they have.");
             }
         }
     }
 
     const finalPayableAmount = calculatedTotal - discountRupees;
+    console.log(`💳 Final Payable Amount: ₹${finalPayableAmount}`);
 
     if (finalPayableAmount <= 0) {
-         return res.status(400).json({ success: false, error: "Invalid Final Total" });
+         console.log("❌ Error: Final amount is zero or negative. Product might be missing in Firebase.");
+         return res.status(400).json({ success: false, error: "Invalid Final Total. Product not found in database." });
     }
 
     // STEP C: CREATE ORDER
     const options = {
-      amount: finalPayableAmount * 100, 
+      amount: finalPayableAmount * 100, // Paise conversion
       currency: "INR",
-      receipt: `receipt_${Date.now()}`
+      receipt: `rcpt_${Date.now().toString().slice(-8)}`
     };
 
     const order = await razorpay.orders.create(options);
+    console.log("✅ Razorpay Order Created:", order.id);
 
     res.json({
       success: true,
@@ -92,12 +121,12 @@ app.post('/api/create-order', async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Server Error:", error);
+    console.error("🔥 Server Error during order creation:", error);
     res.status(500).json({ success: false, error: "Backend server failed to create order." });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Enterprise Server running on port ${PORT}`);
+  console.log(`🚀 Enterprise Server running securely on port ${PORT}`);
 });
