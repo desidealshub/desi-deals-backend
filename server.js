@@ -25,7 +25,7 @@ app.use(express.json());
 
 // 2. RAZORPAY CONNECTION
 const razorpay = new Razorpay({
-  key_id: 'rzp_live_TEsQZJmlsRn0VZ', 
+  key_id: 'rzp_live_TF0DKK9Rjy0EQU', 
   key_secret: process.env.RAZORPAY_SECRET 
 });
 
