@@ -29,7 +29,7 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_SECRET 
 });
 
-// 3. MASTER SECURE API
+// 3. MASTER SECURE API (CREATE ORDER)
 app.post('/api/create-order', async (req, res) => {
   console.log("📦 NEW ORDER REQUEST RECEIVED:", JSON.stringify(req.body)); // Payload check
 
@@ -131,6 +131,40 @@ app.post('/api/create-order', async (req, res) => {
   }
 });
 
+// --- 4. MARKETING PUSH NOTIFICATION API ---
+app.post('/api/admin/send-offer', async (req, res) => {
+    try {
+        const { title, body, imageUrl } = req.body;
+
+        if (!title || !body) {
+            return res.status(400).json({ success: false, message: 'Title aur Body mandatory hai bhai.' });
+        }
+
+        const tokensSnapshot = await db.collection('fcm_tokens').get();
+        const tokens = [];
+        tokensSnapshot.forEach(doc => tokens.push(doc.id));
+
+        if (tokens.length === 0) {
+            return res.status(400).json({ success: false, message: 'Database mein koi token nahi hai.' });
+        }
+
+        const message = {
+            notification: { title, body },
+            tokens: tokens
+        };
+        if (imageUrl) message.notification.image = imageUrl;
+
+        const response = await admin.messaging().sendMulticast(message);
+        console.log(`✅ Push Sent! Success: ${response.successCount}, Failed: ${response.failureCount}`);
+        res.json({ success: true, message: `Notification sent to ${response.successCount} users.` });
+
+    } catch (error) {
+        console.error('❌ Push Notification Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// YEH HAMESHA FILE KE SABSE AAKHIR MEIN RAHEGA
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Enterprise Server running securely on port ${PORT}`);
