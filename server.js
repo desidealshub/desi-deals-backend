@@ -65,7 +65,7 @@ const verifyAdmin = async (req, res, next) => {
     try {
         const decodedToken = await admin.auth().verifyIdToken(token);
         
-        const ADMIN_EMAIL = 'shishirk0401@mail.com'; 
+        const ADMIN_EMAIL = 'shishirk0401@gmail.com'; 
 
         if (decodedToken.email !== ADMIN_EMAIL) {
             console.log(`🚨 Fake Admin alert: ${decodedToken.email} tried to send notification!`);
