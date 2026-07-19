@@ -25,6 +25,21 @@ app.use(cors({
     methods: ['GET', 'POST']
 }));
 app.use(express.json());
+const rateLimit = require('express-rate-limit');
+
+// 🚨 ANTI-DDOS / SPAM GUARD
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, 
+    max: 50, 
+    message: { 
+        success: false, 
+        error: "Aram se bhai! Bahut zyada requests aagayi hain. 15 minute baad try kar." 
+    },
+    standardHeaders: true, 
+    legacyHeaders: false, 
+});
+
+app.use('/api/', apiLimiter);
 
 // 2. RAZORPAY CONNECTION
 const razorpay = new Razorpay({
