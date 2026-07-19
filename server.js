@@ -20,7 +20,10 @@ try {
 
 const db = admin.firestore();
 const app = express();
-app.use(cors());
+app.use(cors({
+    origin: ['https://desidealshub.com', 'http://localhost:3000'], // Tera actual domain
+    methods: ['GET', 'POST']
+}));
 app.use(express.json());
 
 // 2. RAZORPAY CONNECTION
@@ -59,13 +62,36 @@ const verifyAdmin = async (req, res, next) => {
         return res.status(401).json({ success: false, error: "Invalid or expired token." });
     }
 };
+// USER VERIFICATION MIDDLEWARE (For Orders)
+const verifyUser = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    
+    // Agar token nahi hai, toh hum use 'guest' maan lenge (bina points ke)
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        req.user = null; 
+        return next();
+    }
 
+    try {
+        const token = authHeader.split('Bearer ')[1];
+        // Firebase se token check karwao
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        req.user = decodedToken; // Asli verified user data yahan se milega
+        next();
+    } catch (error) {
+        console.error("🚨 User Token Verification Failed:", error.message);
+        return res.status(401).json({ success: false, error: "Invalid login session. Please login again." });
+    }
+};
 // 3. MASTER SECURE API (CREATE ORDER)
-app.post('/api/create-order', async (req, res) => {
+app.post('/api/create-order', verifyUser, async (req, res) => {
   console.log("📦 NEW ORDER REQUEST RECEIVED:", JSON.stringify(req.body)); // Payload check
 
   try {
-    const { cartItems, userEmail, pointsToUse } = req.body; 
+    // NAYA BULLETPROOF CODE (Isko paste kar):
+const { cartItems, pointsToUse } = req.body;
+// 🚨 ANTI-SPOOFING FIX: Frontend ka bheja userEmail ignore karo. Token se email nikalo!
+const userEmail = req.user ? req.user.email : 'guest'; 
 
     if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
         console.log("❌ Error: Cart is empty or invalid format.");
