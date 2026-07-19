@@ -28,6 +28,37 @@ const razorpay = new Razorpay({
   key_id: 'rzp_live_TF0DKK9Rjy0EQU', 
   key_secret: process.env.RAZORPAY_SECRET 
 });
+// ADMIN VERIFICATION MIDDLEWARE
+const verifyAdmin = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    
+    // Check if token exists
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        console.log("🚨 Unauthorized access attempt!");
+        return res.status(401).json({ success: false, error: "Token missing. Chal nikal!" });
+    }
+
+    const token = authHeader.split('Bearer ')[1];
+
+    try {
+        // Firebase se token verify karwao
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        
+        // YAHAN APNA ASLI ADMIN EMAIL DAAL
+        const ADMIN_EMAIL = 'tera.admin@email.com'; 
+
+        if (decodedToken.email !== ADMIN_EMAIL) {
+            console.log(`🚨 Fake Admin alert: ${decodedToken.email} tried to send notification!`);
+            return res.status(403).json({ success: false, error: "Aukat se bahar! You are not the admin." });
+        }
+
+        req.user = decodedToken; // Verification pass, aage badho
+        next();
+    } catch (error) {
+        console.error("🚨 Token Verification Failed:", error.message);
+        return res.status(401).json({ success: false, error: "Invalid or expired token." });
+    }
+};
 
 // 3. MASTER SECURE API (CREATE ORDER)
 app.post('/api/create-order', async (req, res) => {
