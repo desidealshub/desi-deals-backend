@@ -163,7 +163,7 @@ app.post('/api/create-order', async (req, res) => {
 });
 
 // --- 4. MARKETING PUSH NOTIFICATION API (FIXED FOR v12+) ---
-app.post('/api/admin/send-offer', async (req, res) => {
+app.post('/api/admin/send-offer', verifyAdmin, async (req, res) => {
     try {
         const { title, body, imageUrl } = req.body;
 
