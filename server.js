@@ -274,6 +274,54 @@ app.post('/api/admin/send-offer', verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, error: "Internal Server Error. Please try again later." });
     }
 });
+// --- 5. INDIVIDUAL PUSH NOTIFICATION (ORDER TRACKING) ---
+app.post('/api/admin/update-tracking', verifyAdmin, async (req, res) => {
+    try {
+        const { orderId, trackingUrl } = req.body;
+        
+        if (!orderId || !trackingUrl) {
+            return res.status(400).json({ success: false, message: 'Order ID aur Tracking URL dono zaruri hain!' });
+        }
+
+        // 1. Order fetch kar
+        const orderDoc = await db.collection('orders').doc(orderId).get();
+        if (!orderDoc.exists) {
+            return res.status(404).json({ success: false, message: 'Order ID database mein nahi mili.' });
+        }
+        
+        const orderData = orderDoc.data();
+        const targetEmail = orderData.userAccount;
+
+        // 2. Order status update kar
+        await db.collection('orders').doc(orderId).update({
+            trackingUrl: trackingUrl,
+            status: 'Dispatched'
+        });
+
+        // 3. Notification bhejo (agar user logged in hai)
+        if (targetEmail && targetEmail !== 'Guest' && targetEmail !== 'guest') {
+            const tokensSnapshot = await db.collection('fcm_tokens').where('user', '==', targetEmail).get();
+            const tokens = [];
+            tokensSnapshot.forEach(doc => tokens.push(doc.id));
+
+            if (tokens.length > 0) {
+                const message = {
+                    notification: {
+                        title: "📦 Order Dispatched!",
+                        body: "Aapka order nikal chuka hai. Track karne ke liye tap karein."
+                    },
+                    tokens: tokens
+                };
+                await admin.messaging().sendEachForMulticast(message);
+            }
+        }
+        
+        res.json({ success: true, message: "Order updated & Notification sent!" });
+    } catch (error) {
+        console.error('🔥 Error:', error);
+        res.status(500).json({ success: false, error: "Server Error" });
+    }
+});
 
 // YEH HAMESHA FILE KE SABSE AAKHIR MEIN RAHEGA
 const PORT = process.env.PORT || 3000;
