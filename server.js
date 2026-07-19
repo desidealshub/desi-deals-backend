@@ -1,3 +1,5 @@
+const xss = require('xss');
+const crypto = require('crypto');
 const express = require('express');
 const Razorpay = require('razorpay');
 const cors = require('cors');
@@ -20,11 +22,13 @@ try {
 
 const db = admin.firestore();
 const app = express();
+
 app.use(cors({
     origin: ['https://desidealshub.com', 'http://localhost:3000'], // Tera actual domain
     methods: ['GET', 'POST']
 }));
 app.use(express.json());
+
 const rateLimit = require('express-rate-limit');
 
 // 🚨 ANTI-DDOS / SPAM GUARD
@@ -46,11 +50,11 @@ const razorpay = new Razorpay({
   key_id: 'rzp_live_TF0DKK9Rjy0EQU', 
   key_secret: process.env.RAZORPAY_SECRET 
 });
+
 // ADMIN VERIFICATION MIDDLEWARE
 const verifyAdmin = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     
-    // Check if token exists
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         console.log("🚨 Unauthorized access attempt!");
         return res.status(401).json({ success: false, error: "Token missing. Chal nikal!" });
@@ -59,10 +63,8 @@ const verifyAdmin = async (req, res, next) => {
     const token = authHeader.split('Bearer ')[1];
 
     try {
-        // Firebase se token verify karwao
         const decodedToken = await admin.auth().verifyIdToken(token);
         
-        // YAHAN APNA ASLI ADMIN EMAIL DAAL
         const ADMIN_EMAIL = 'shishirk0401@mail.com'; 
 
         if (decodedToken.email !== ADMIN_EMAIL) {
@@ -70,18 +72,18 @@ const verifyAdmin = async (req, res, next) => {
             return res.status(403).json({ success: false, error: "Aukat se bahar! You are not the admin." });
         }
 
-        req.user = decodedToken; // Verification pass, aage badho
+        req.user = decodedToken; 
         next();
     } catch (error) {
         console.error("🚨 Token Verification Failed:", error.message);
         return res.status(401).json({ success: false, error: "Invalid or expired token." });
     }
 };
+
 // USER VERIFICATION MIDDLEWARE (For Orders)
 const verifyUser = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     
-    // Agar token nahi hai, toh hum use 'guest' maan lenge (bina points ke)
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         req.user = null; 
         return next();
@@ -89,24 +91,31 @@ const verifyUser = async (req, res, next) => {
 
     try {
         const token = authHeader.split('Bearer ')[1];
-        // Firebase se token check karwao
         const decodedToken = await admin.auth().verifyIdToken(token);
-        req.user = decodedToken; // Asli verified user data yahan se milega
+        req.user = decodedToken; 
         next();
     } catch (error) {
         console.error("🚨 User Token Verification Failed:", error.message);
         return res.status(401).json({ success: false, error: "Invalid login session. Please login again." });
     }
 };
+
 // 3. MASTER SECURE API (CREATE ORDER)
 app.post('/api/create-order', verifyUser, async (req, res) => {
-  console.log("📦 NEW ORDER REQUEST RECEIVED:", JSON.stringify(req.body)); // Payload check
+  console.log("📦 NEW ORDER REQUEST RECEIVED:", JSON.stringify(req.body)); 
 
   try {
-    // NAYA BULLETPROOF CODE (Isko paste kar):
-const { cartItems, pointsToUse } = req.body;
-// 🚨 ANTI-SPOOFING FIX: Frontend ka bheja userEmail ignore karo. Token se email nikalo!
-const userEmail = req.user ? req.user.email : 'guest'; 
+    const { cartItems, pointsToUse } = req.body;
+    
+    // 🚨 ANTI-SPOOFING FIX: Token se email nikalo
+    const userEmail = req.user ? req.user.email : 'guest'; 
+
+    // 🚨 XSS SANITIZATION FOR FUTURE FIELDS 🚨
+    // Jab frontend se shipping info aayegi, ye variables saaf data hold karenge
+    const cleanName = req.body.name ? xss(req.body.name) : 'Not Provided';
+    const cleanAddress = req.body.address ? xss(req.body.address) : 'Not Provided';
+    const cleanPhone = req.body.phone ? xss(req.body.phone) : 'Not Provided';
+    const cleanNotes = req.body.notes ? xss(req.body.notes) : '';
 
     if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
         console.log("❌ Error: Cart is empty or invalid format.");
@@ -115,14 +124,14 @@ const userEmail = req.user ? req.user.email : 'guest';
 
     let calculatedTotal = 0;
 
-   // STEP A: SERVER-SIDE PRICE VALIDATION
+    // STEP A: SERVER-SIDE PRICE VALIDATION
     for (let item of cartItems) {
         if (!item.id) {
             console.log("⚠️ Warning: Item missing ID in payload, skipping...");
             continue;
         }
 
-        // 🚨 SECURITY FIX: BLOCK QUANTITY HACKS (NEGATIVE OR ZERO QTY) 🚨
+        // 🚨 SECURITY FIX: BLOCK QUANTITY HACKS
         if (item.qty < 1 || isNaN(item.qty)) {
             console.log(`❌ Hacker alert: Invalid quantity ${item.qty} detected for product ${item.id}`);
             return res.status(400).json({ success: false, error: "Invalid product quantity detected." });
@@ -150,6 +159,7 @@ const userEmail = req.user ? req.user.email : 'guest';
     }
 
     console.log(`💰 Calculated Base Total from DB: ₹${calculatedTotal}`);
+    
     // STEP B: POINTS VALIDATION
     let discountRupees = 0;
     let actualPointsUsed = 0;
@@ -175,13 +185,13 @@ const userEmail = req.user ? req.user.email : 'guest';
     console.log(`💳 Final Payable Amount: ₹${finalPayableAmount}`);
 
     if (finalPayableAmount <= 0) {
-         console.log("❌ Error: Final amount is zero or negative. Product might be missing in Firebase.");
+         console.log("❌ Error: Final amount is zero or negative.");
          return res.status(400).json({ success: false, error: "Invalid Final Total. Product not found in database." });
     }
 
     // STEP C: CREATE ORDER
     const options = {
-      amount: finalPayableAmount * 100, // Paise conversion
+      amount: finalPayableAmount * 100, 
       currency: "INR",
       receipt: `rcpt_${Date.now().toString().slice(-8)}`
     };
@@ -198,12 +208,36 @@ const userEmail = req.user ? req.user.email : 'guest';
     });
 
   } catch (error) {
-    console.error("🔥 Server Error during order creation:", error);
-    res.status(500).json({ success: false, error: "Backend server failed to create order." });
+    console.error("🔥 ACTUAL SYSTEM ERROR:", error);
+    res.status(500).json({ success: false, error: "Internal Server Error. Please try again later." });
   }
 });
 
-// --- 4. MARKETING PUSH NOTIFICATION API (FIXED FOR v12+) ---
+// RAZORPAY PAYMENT VERIFICATION API
+app.post('/api/verify-payment', async (req, res) => {
+    try {
+        const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+        const sign = razorpay_order_id + "|" + razorpay_payment_id;
+        const expectedSign = crypto
+            .createHmac("sha256", process.env.RAZORPAY_SECRET)
+            .update(sign.toString())
+            .digest("hex");
+
+        if (razorpay_signature === expectedSign) {
+            console.log("✅ Payment Verified for Order:", razorpay_order_id);
+            return res.status(200).json({ success: true, message: "Payment verified successfully" });
+        } else {
+            console.log("🚨 FAKE PAYMENT DETECTED! Signature mismatch.");
+            return res.status(400).json({ success: false, message: "Invalid signature! Hacker detected." });
+        }
+    } catch (error) {
+        console.error("🔥 ACTUAL SYSTEM ERROR:", error);
+        res.status(500).json({ success: false, error: "Internal Server Error. Please try again later." }); 
+    }
+});
+
+// --- 4. MARKETING PUSH NOTIFICATION API ---
 app.post('/api/admin/send-offer', verifyAdmin, async (req, res) => {
     try {
         const { title, body, imageUrl } = req.body;
@@ -220,28 +254,27 @@ app.post('/api/admin/send-offer', verifyAdmin, async (req, res) => {
             return res.status(400).json({ success: false, message: 'Database mein koi token nahi hai.' });
         }
 
-        // NAYA TARIKA: Message array banao
         const message = {
             notification: { title, body },
             tokens: tokens
         };
         
-        // Agar image hai toh usse notification object mein daalo
         if (imageUrl) {
             message.notification.image = imageUrl;
         }
 
-        // PURANE sendMulticast ki jagah sendEachForMulticast use karo
         const response = await admin.messaging().sendEachForMulticast(message);
         
         console.log(`✅ Push Sent! Success: ${response.successCount}, Failed: ${response.failureCount}`);
         res.json({ success: true, message: `Notification sent to ${response.successCount} users.` });
 
     } catch (error) {
-        console.error('❌ Push Notification Error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        console.error('🔥 ACTUAL SYSTEM ERROR:', error);
+        // YAHAN LEAKAGE HO RAHA THA JO FIX KAR DIYA HAI
+        res.status(500).json({ success: false, error: "Internal Server Error. Please try again later." });
     }
 });
+
 // YEH HAMESHA FILE KE SABSE AAKHIR MEIN RAHEGA
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
