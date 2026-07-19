@@ -45,7 +45,7 @@ const verifyAdmin = async (req, res, next) => {
         const decodedToken = await admin.auth().verifyIdToken(token);
         
         // YAHAN APNA ASLI ADMIN EMAIL DAAL
-        const ADMIN_EMAIL = 'tera.admin@email.com'; 
+        const ADMIN_EMAIL = 'shishirk0401@mail.com'; 
 
         if (decodedToken.email !== ADMIN_EMAIL) {
             console.log(`🚨 Fake Admin alert: ${decodedToken.email} tried to send notification!`);
