@@ -24,7 +24,7 @@ const db = admin.firestore();
 const app = express();
 
 app.use(cors({
-    origin: ['https://desidealshub.com', 'http://localhost:3000'], // Tera actual domain
+    origin: ['https://desidealshub.com', 'http://localhost:3000'],
     methods: ['GET', 'POST']
 }));
 app.use(express.json());
@@ -64,7 +64,6 @@ const verifyAdmin = async (req, res, next) => {
 
     try {
         const decodedToken = await admin.auth().verifyIdToken(token);
-        
         const ADMIN_EMAIL = 'shishirk0401@gmail.com'; 
 
         if (decodedToken.email !== ADMIN_EMAIL) {
@@ -80,7 +79,7 @@ const verifyAdmin = async (req, res, next) => {
     }
 };
 
-// USER VERIFICATION MIDDLEWARE (For Orders)
+// USER VERIFICATION MIDDLEWARE
 const verifyUser = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     
@@ -106,43 +105,28 @@ app.post('/api/create-order', verifyUser, async (req, res) => {
 
   try {
     const { cartItems, pointsToUse } = req.body;
-    
-    // 🚨 ANTI-SPOOFING FIX: Token se email nikalo
     const userEmail = req.user ? req.user.email : 'guest'; 
 
-    // 🚨 XSS SANITIZATION FOR FUTURE FIELDS 🚨
-    // Jab frontend se shipping info aayegi, ye variables saaf data hold karenge
     const cleanName = req.body.name ? xss(req.body.name) : 'Not Provided';
     const cleanAddress = req.body.address ? xss(req.body.address) : 'Not Provided';
     const cleanPhone = req.body.phone ? xss(req.body.phone) : 'Not Provided';
     const cleanNotes = req.body.notes ? xss(req.body.notes) : '';
 
     if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
-        console.log("❌ Error: Cart is empty or invalid format.");
         return res.status(400).json({ success: false, error: "Cart is empty" });
     }
 
     let calculatedTotal = 0;
 
-    // STEP A: SERVER-SIDE PRICE VALIDATION
     for (let item of cartItems) {
-        if (!item.id) {
-            console.log("⚠️ Warning: Item missing ID in payload, skipping...");
-            continue;
-        }
+        if (!item.id) continue;
 
-        // 🚨 SECURITY FIX: BLOCK QUANTITY HACKS
         if (item.qty < 1 || isNaN(item.qty)) {
-            console.log(`❌ Hacker alert: Invalid quantity ${item.qty} detected for product ${item.id}`);
             return res.status(400).json({ success: false, error: "Invalid product quantity detected." });
         }
 
         const productDoc = await db.collection('products').doc(item.id).get();
-        
-        if (!productDoc.exists) {
-            console.log(`❌ Error: Product ID ${item.id} not found in database!`);
-            continue; 
-        }
+        if (!productDoc.exists) continue; 
 
         const productData = productDoc.data();
         let itemPrice = productData.price;
@@ -151,16 +135,11 @@ app.post('/api/create-order', verifyUser, async (req, res) => {
             const sizeObj = productData.sizesData.find(s => s.size === item.selectedSize);
             if (sizeObj) {
                 itemPrice = sizeObj.price;
-            } else {
-                console.log(`⚠️ Warning: Size ${item.selectedSize} not found for product ${item.id}. Using default price.`);
             }
         }
         calculatedTotal += (itemPrice * (item.qty || 1));
     }
-
-    console.log(`💰 Calculated Base Total from DB: ₹${calculatedTotal}`);
     
-    // STEP B: POINTS VALIDATION
     let discountRupees = 0;
     let actualPointsUsed = 0;
 
@@ -174,22 +153,16 @@ app.post('/api/create-order', verifyUser, async (req, res) => {
             if (userPoints >= pointsToUse) {
                  actualPointsUsed = Math.min(pointsToUse, maxPointsAllowed);
                  discountRupees = Math.floor(actualPointsUsed * 0.02);
-                 console.log(`🎁 Discount Applied: -₹${discountRupees} (${actualPointsUsed} points)`);
-            } else {
-                 console.log("⚠️ Warning: User tried to use more points than they have.");
             }
         }
     }
 
     const finalPayableAmount = calculatedTotal - discountRupees;
-    console.log(`💳 Final Payable Amount: ₹${finalPayableAmount}`);
 
     if (finalPayableAmount <= 0) {
-         console.log("❌ Error: Final amount is zero or negative.");
-         return res.status(400).json({ success: false, error: "Invalid Final Total. Product not found in database." });
+         return res.status(400).json({ success: false, error: "Invalid Final Total." });
     }
 
-    // STEP C: CREATE ORDER
     const options = {
       amount: finalPayableAmount * 100, 
       currency: "INR",
@@ -197,7 +170,6 @@ app.post('/api/create-order', verifyUser, async (req, res) => {
     };
 
     const order = await razorpay.orders.create(options);
-    console.log("✅ Razorpay Order Created:", order.id);
 
     res.json({
       success: true,
@@ -209,7 +181,7 @@ app.post('/api/create-order', verifyUser, async (req, res) => {
 
   } catch (error) {
     console.error("🔥 ACTUAL SYSTEM ERROR:", error);
-    res.status(500).json({ success: false, error: "Internal Server Error. Please try again later." });
+    res.status(500).json({ success: false, error: "Internal Server Error." });
   }
 });
 
@@ -225,19 +197,17 @@ app.post('/api/verify-payment', async (req, res) => {
             .digest("hex");
 
         if (razorpay_signature === expectedSign) {
-            console.log("✅ Payment Verified for Order:", razorpay_order_id);
             return res.status(200).json({ success: true, message: "Payment verified successfully" });
         } else {
-            console.log("🚨 FAKE PAYMENT DETECTED! Signature mismatch.");
             return res.status(400).json({ success: false, message: "Invalid signature! Hacker detected." });
         }
     } catch (error) {
         console.error("🔥 ACTUAL SYSTEM ERROR:", error);
-        res.status(500).json({ success: false, error: "Internal Server Error. Please try again later." }); 
+        res.status(500).json({ success: false, error: "Internal Server Error." }); 
     }
 });
 
-// --- 4. MARKETING PUSH NOTIFICATION API ---
+// --- 4. 🚀 UPGRADED MARKETING PUSH NOTIFICATION API (AUTO-CHUNKING & DEAD TOKEN CLEANUP) ---
 app.post('/api/admin/send-offer', verifyAdmin, async (req, res) => {
     try {
         const { title, body, imageUrl } = req.body;
@@ -247,31 +217,60 @@ app.post('/api/admin/send-offer', verifyAdmin, async (req, res) => {
         }
 
         const tokensSnapshot = await db.collection('fcm_tokens').get();
-        const tokens = [];
-        tokensSnapshot.forEach(doc => tokens.push(doc.id));
+        const allTokens = [];
+        tokensSnapshot.forEach(doc => allTokens.push(doc.id));
 
-        if (tokens.length === 0) {
+        if (allTokens.length === 0) {
             return res.status(400).json({ success: false, message: 'Database mein koi token nahi hai.' });
         }
 
-        const message = {
-            notification: { title, body },
-            tokens: tokens
-        };
-        
-        if (imageUrl) {
-            message.notification.image = imageUrl;
+        let totalSuccess = 0;
+        let totalFailed = 0;
+        const tokensToRemove = [];
+
+        // FIREBASE LIMIT: 500 tokens max per request. Array ko divide kar rahe hain.
+        const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+        const tokenChunks = chunkArray(allTokens, 500);
+
+        for (const chunk of tokenChunks) {
+            const message = { notification: { title, body }, tokens: chunk };
+            if (imageUrl) message.notification.image = imageUrl;
+
+            const response = await admin.messaging().sendEachForMulticast(message);
+            totalSuccess += response.successCount;
+            totalFailed += response.failureCount;
+
+            // DEAD TOKENS DHOONDHO (Uninstalled / Revoked permission)
+            if (response.failureCount > 0) {
+                response.responses.forEach((resp, idx) => {
+                    if (!resp.success) {
+                        const errorCode = resp.error.code;
+                        if (errorCode === 'messaging/invalid-registration-token' ||
+                            errorCode === 'messaging/registration-token-not-registered') {
+                            tokensToRemove.push(chunk[idx]);
+                        }
+                    }
+                });
+            }
         }
 
-        const response = await admin.messaging().sendEachForMulticast(message);
-        
-        console.log(`✅ Push Sent! Success: ${response.successCount}, Failed: ${response.failureCount}`);
-        res.json({ success: true, message: `Notification sent to ${response.successCount} users.` });
+        // DATABASE SE DEAD TOKENS HATAO (Auto-Sweeper)
+        if (tokensToRemove.length > 0) {
+            const batch = db.batch();
+            tokensToRemove.forEach(token => {
+                const tokenRef = db.collection('fcm_tokens').doc(token);
+                batch.delete(tokenRef);
+            });
+            await batch.commit();
+            console.log(`🧹 Cleaned up ${tokensToRemove.length} dead tokens from database.`);
+        }
+
+        console.log(`✅ Push Sent! Success: ${totalSuccess}, Failed: ${totalFailed}`);
+        res.json({ success: true, message: `Notification sent to ${totalSuccess} users. (Cleaned ${tokensToRemove.length} dead tokens)` });
 
     } catch (error) {
         console.error('🔥 ACTUAL SYSTEM ERROR:', error);
-        // YAHAN LEAKAGE HO RAHA THA JO FIX KAR DIYA HAI
-        res.status(500).json({ success: false, error: "Internal Server Error. Please try again later." });
+        res.status(500).json({ success: false, error: "Internal Server Error." });
     }
 });
 
@@ -284,7 +283,6 @@ app.post('/api/admin/update-tracking', verifyAdmin, async (req, res) => {
             return res.status(400).json({ success: false, message: 'Order ID aur Tracking URL dono zaruri hain!' });
         }
 
-        // 1. Order fetch kar
         const orderDoc = await db.collection('orders').doc(orderId).get();
         if (!orderDoc.exists) {
             return res.status(404).json({ success: false, message: 'Order ID database mein nahi mili.' });
@@ -292,22 +290,16 @@ app.post('/api/admin/update-tracking', verifyAdmin, async (req, res) => {
         
         const orderData = orderDoc.data();
         const targetEmail = orderData.userAccount;
-        
-        // 🚨 NAYA ADDITION: Order data se customer ka phone number nikal
         const targetPhone = orderData.customerPhone; 
 
-        // 2. Order status update kar
         await db.collection('orders').doc(orderId).update({
             trackingUrl: trackingUrl,
             status: 'Dispatched'
         });
 
-        // 3. 🚨 UPGRADED LOGIC: Notification bhejo
-        // Agar user logged in hai toh email use kar, warna guest ka phone number use kar
         const targetId = (targetEmail && targetEmail !== 'Guest' && targetEmail !== 'guest') ? targetEmail : targetPhone;
 
         if (targetId) {
-            // Ab ye database mein email aur phone dono dhoondh lega
             const tokensSnapshot = await db.collection('fcm_tokens').where('user', '==', targetId).get();
             const tokens = [];
             tokensSnapshot.forEach(doc => tokens.push(doc.id));
@@ -320,10 +312,23 @@ app.post('/api/admin/update-tracking', verifyAdmin, async (req, res) => {
                     },
                     tokens: tokens
                 };
-                await admin.messaging().sendEachForMulticast(message);
-                console.log(`✅ Notification sent to devices for: ${targetId}`);
-            } else {
-                console.log(`⚠️ No token found in DB for: ${targetId}`);
+                
+                const response = await admin.messaging().sendEachForMulticast(message);
+                
+                // Track update API me bhi dead token cleanup laga diya hai
+                const tokensToRemove = [];
+                if (response.failureCount > 0) {
+                    response.responses.forEach((resp, idx) => {
+                        if (!resp.success && (resp.error.code === 'messaging/invalid-registration-token' || resp.error.code === 'messaging/registration-token-not-registered')) {
+                            tokensToRemove.push(tokens[idx]);
+                        }
+                    });
+                    if (tokensToRemove.length > 0) {
+                        const batch = db.batch();
+                        tokensToRemove.forEach(token => batch.delete(db.collection('fcm_tokens').doc(token)));
+                        await batch.commit();
+                    }
+                }
             }
         }
         
@@ -334,7 +339,6 @@ app.post('/api/admin/update-tracking', verifyAdmin, async (req, res) => {
     }
 });
 
-// YEH HAMESHA FILE KE SABSE AAKHIR MEIN RAHEGA
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Enterprise Server running securely on port ${PORT}`);
