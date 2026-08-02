@@ -216,7 +216,31 @@ app.post('/api/verify-payment', async (req, res) => {
 });
 
 // --- 4. 🚀 UPGRADED MARKETING PUSH NOTIFICATION API (AUTO-CHUNKING & DEAD TOKEN CLEANUP) ---
-for (const chunk of tokenChunks) {
+app.post('/api/admin/send-offer', verifyAdmin, async (req, res) => {
+    try {
+        const { title, body, imageUrl } = req.body;
+
+        if (!title || !body) {
+            return res.status(400).json({ success: false, message: 'Title aur Body mandatory hai bhai.' });
+        }
+
+        const tokensSnapshot = await db.collection('fcm_tokens').get();
+        const allTokens = [];
+        tokensSnapshot.forEach(doc => allTokens.push(doc.id));
+
+        if (allTokens.length === 0) {
+            return res.status(400).json({ success: false, message: 'Database mein koi token nahi hai.' });
+        }
+
+        let totalSuccess = 0;
+        let totalFailed = 0;
+        const tokensToRemove = [];
+
+        // FIREBASE LIMIT: 500 tokens max per request. Array ko divide kar rahe hain.
+        const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+        const tokenChunks = chunkArray(allTokens, 500);
+
+        for (const chunk of tokenChunks) {
             const message = { notification: { title, body }, tokens: chunk };
             if (imageUrl) message.notification.image = imageUrl;
 
@@ -258,12 +282,12 @@ for (const chunk of tokenChunks) {
 
         console.log(`✅ Push Sent! Success: ${totalSuccess}, Failed: ${totalFailed}`);
         res.json({ success: true, message: `Notification sent to ${totalSuccess} users. (Found ${tokensToRemove.length} dead tokens, check logs)` });
+
     } catch (error) {
         console.error('🔥 ACTUAL SYSTEM ERROR:', error);
         res.status(500).json({ success: false, error: "Internal Server Error." });
     }
 });
-
 // --- 5. INDIVIDUAL PUSH NOTIFICATION (ORDER TRACKING) ---
 app.post('/api/admin/update-tracking', verifyAdmin, async (req, res) => {
     try {
