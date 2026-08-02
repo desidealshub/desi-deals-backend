@@ -274,6 +274,7 @@ app.post('/api/admin/send-offer', verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, error: "Internal Server Error. Please try again later." });
     }
 });
+
 // --- 5. INDIVIDUAL PUSH NOTIFICATION (ORDER TRACKING) ---
 app.post('/api/admin/update-tracking', verifyAdmin, async (req, res) => {
     try {
@@ -291,6 +292,9 @@ app.post('/api/admin/update-tracking', verifyAdmin, async (req, res) => {
         
         const orderData = orderDoc.data();
         const targetEmail = orderData.userAccount;
+        
+        // 🚨 NAYA ADDITION: Order data se customer ka phone number nikal
+        const targetPhone = orderData.customerPhone; 
 
         // 2. Order status update kar
         await db.collection('orders').doc(orderId).update({
@@ -298,9 +302,13 @@ app.post('/api/admin/update-tracking', verifyAdmin, async (req, res) => {
             status: 'Dispatched'
         });
 
-        // 3. Notification bhejo (agar user logged in hai)
-        if (targetEmail && targetEmail !== 'Guest' && targetEmail !== 'guest') {
-            const tokensSnapshot = await db.collection('fcm_tokens').where('user', '==', targetEmail).get();
+        // 3. 🚨 UPGRADED LOGIC: Notification bhejo
+        // Agar user logged in hai toh email use kar, warna guest ka phone number use kar
+        const targetId = (targetEmail && targetEmail !== 'Guest' && targetEmail !== 'guest') ? targetEmail : targetPhone;
+
+        if (targetId) {
+            // Ab ye database mein email aur phone dono dhoondh lega
+            const tokensSnapshot = await db.collection('fcm_tokens').where('user', '==', targetId).get();
             const tokens = [];
             tokensSnapshot.forEach(doc => tokens.push(doc.id));
 
@@ -313,10 +321,13 @@ app.post('/api/admin/update-tracking', verifyAdmin, async (req, res) => {
                     tokens: tokens
                 };
                 await admin.messaging().sendEachForMulticast(message);
+                console.log(`✅ Notification sent to devices for: ${targetId}`);
+            } else {
+                console.log(`⚠️ No token found in DB for: ${targetId}`);
             }
         }
         
-        res.json({ success: true, message: "Order updated & Notification sent!" });
+        res.json({ success: true, message: "Order updated & Notification check complete!" });
     } catch (error) {
         console.error('🔥 Error:', error);
         res.status(500).json({ success: false, error: "Server Error" });
