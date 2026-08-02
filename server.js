@@ -5,19 +5,27 @@ const Razorpay = require('razorpay');
 const cors = require('cors');
 const admin = require('firebase-admin');
 
-// 1. FIREBASE SECURE CONNECTION (WITH ERROR HANDLING)
+// 1. FIREBASE SECURE CONNECTION (WITH LOCAL FALLBACK)
 try {
-    if (!process.env.FIREBASE_CREDENTIALS) {
-        console.error("🚨 FATAL ERROR: FIREBASE_CREDENTIALS environment variable is missing in Render!");
+    let serviceAccount;
+    
+    if (process.env.FIREBASE_CREDENTIALS) {
+        // Render server ke liye Environment Variable se uthayega
+        serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
+        console.log("🟢 Loaded Firebase credentials from Environment Variable.");
     } else {
-        const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
-        admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount)
-        });
-        console.log("✅ Firebase Admin Connected Successfully!");
+        // Apne local computer par testing ke liye file se uthayega
+        serviceAccount = require('./serviceAccountKey.json');
+        console.log("🟡 Loaded Firebase credentials from local serviceAccountKey.json file.");
     }
+
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+    });
+    
+    console.log("✅ Firebase Admin Connected Successfully!");
 } catch (err) {
-    console.error("🚨 Firebase Init Error. Check your JSON formatting in Render Environment Variables:", err);
+    console.error("🚨 Firebase Init Error. Check your JSON formatting in Render Environment Variables or local key file:", err);
 }
 
 const db = admin.firestore();
