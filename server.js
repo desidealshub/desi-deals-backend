@@ -205,6 +205,24 @@ app.post('/api/verify-payment', async (req, res) => {
             .digest("hex");
 
         if (razorpay_signature === expectedSign) {
+            
+            // ==========================================
+            // 🇮🇳 DONATION TRACKER (ONLINE PAYMENTS ONLY) 🇮🇳
+            // ==========================================
+            try {
+                const admin = require('firebase-admin');
+                // Hum assume kar rahe hain ki 'db' pehle se initialized hai tere server.js mein
+                await db.collection('public_stats').doc('donation_tracker').update({
+                    totalOrders: admin.firestore.FieldValue.increment(1),
+                    raisedAmount: admin.firestore.FieldValue.increment(10)
+                });
+                console.log("✅ [Donation Tracker]: ₹10 Added from Online Payment.");
+            } catch (trackerErr) {
+                // Agar tracker mein issue aaya, tab bhi payment success process hoga
+                console.error("⚠️ [Donation Tracker Error]:", trackerErr);
+            }
+            // ==========================================
+
             return res.status(200).json({ success: true, message: "Payment verified successfully" });
         } else {
             return res.status(400).json({ success: false, message: "Invalid signature! Hacker detected." });
