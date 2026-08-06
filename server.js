@@ -5,16 +5,14 @@ const Razorpay = require('razorpay');
 const cors = require('cors');
 const admin = require('firebase-admin');
 
-// 1. FIREBASE SECURE CONNECTION (WITH LOCAL FALLBACK)
+// 1. FIREBASE SECURE CONNECTION
 try {
     let serviceAccount;
     
     if (process.env.FIREBASE_CREDENTIALS) {
-        // Render server ke liye Environment Variable se uthayega
         serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
         console.log("🟢 Loaded Firebase credentials from Environment Variable.");
     } else {
-        // Apne local computer par testing ke liye file se uthayega
         serviceAccount = require('./serviceAccountKey.json');
         console.log("🟡 Loaded Firebase credentials from local serviceAccountKey.json file.");
     }
@@ -25,7 +23,7 @@ try {
     
     console.log("✅ Firebase Admin Connected Successfully!");
 } catch (err) {
-    console.error("🚨 Firebase Init Error. Check your JSON formatting in Render Environment Variables or local key file:", err);
+    console.error("🚨 Firebase Init Error:", err);
 }
 
 const db = admin.firestore();
@@ -64,7 +62,6 @@ const verifyAdmin = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        console.log("🚨 Unauthorized access attempt!");
         return res.status(401).json({ success: false, error: "Token missing. Chal nikal!" });
     }
 
@@ -75,19 +72,17 @@ const verifyAdmin = async (req, res, next) => {
         const ADMIN_EMAIL = 'shishirk0401@gmail.com'; 
 
         if (decodedToken.email !== ADMIN_EMAIL) {
-            console.log(`🚨 Fake Admin alert: ${decodedToken.email} tried to send notification!`);
             return res.status(403).json({ success: false, error: "Aukat se bahar! You are not the admin." });
         }
 
         req.user = decodedToken; 
         next();
     } catch (error) {
-        console.error("🚨 Token Verification Failed:", error.message);
-        return res.status(401).json({ success: false, error: "Invalid or expired token." });
+        return res.status(401).json({ success: false, error: "Invalid or expired admin token." });
     }
 };
 
-// USER VERIFICATION MIDDLEWARE
+// 🚨 USER VERIFICATION MIDDLEWARE (THE GUEST CHECKOUT FIX) 🚨
 const verifyUser = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     
@@ -96,8 +91,16 @@ const verifyUser = async (req, res, next) => {
         return next();
     }
 
+    const token = authHeader.split('Bearer ')[1];
+
+    // YAHAN HAI GUEST KA BYPASS FIX
+    if (token === "GUEST") {
+        console.log("👤 Guest user checkout initiated.");
+        req.user = null; 
+        return next();
+    }
+
     try {
-        const token = authHeader.split('Bearer ')[1];
         const decodedToken = await admin.auth().verifyIdToken(token);
         req.user = decodedToken; 
         next();
@@ -109,16 +112,11 @@ const verifyUser = async (req, res, next) => {
 
 // 3. MASTER SECURE API (CREATE ORDER)
 app.post('/api/create-order', verifyUser, async (req, res) => {
-  console.log("📦 NEW ORDER REQUEST RECEIVED:", JSON.stringify(req.body)); 
+  console.log("📦 NEW ORDER REQUEST RECEIVED"); 
 
   try {
     const { cartItems, pointsToUse } = req.body;
-    const userEmail = req.user ? req.user.email : 'guest'; 
-
-    const cleanName = req.body.name ? xss(req.body.name) : 'Not Provided';
-    const cleanAddress = req.body.address ? xss(req.body.address) : 'Not Provided';
-    const cleanPhone = req.body.phone ? xss(req.body.phone) : 'Not Provided';
-    const cleanNotes = req.body.notes ? xss(req.body.notes) : '';
+    const userEmail = req.user ? req.user.email : 'guest'; // Guest aayega yahan ab easily
 
     if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
         return res.status(400).json({ success: false, error: "Cart is empty" });
@@ -206,22 +204,16 @@ app.post('/api/verify-payment', async (req, res) => {
 
         if (razorpay_signature === expectedSign) {
             
-            // ==========================================
-            // 🇮🇳 DONATION TRACKER (ONLINE PAYMENTS ONLY) 🇮🇳
-            // ==========================================
+            // 🇮🇳 DONATION TRACKER
             try {
-                const admin = require('firebase-admin');
-                // Hum assume kar rahe hain ki 'db' pehle se initialized hai tere server.js mein
                 await db.collection('public_stats').doc('donation_tracker').update({
                     totalOrders: admin.firestore.FieldValue.increment(1),
                     raisedAmount: admin.firestore.FieldValue.increment(10)
                 });
                 console.log("✅ [Donation Tracker]: ₹10 Added from Online Payment.");
             } catch (trackerErr) {
-                // Agar tracker mein issue aaya, tab bhi payment success process hoga
                 console.error("⚠️ [Donation Tracker Error]:", trackerErr);
             }
-            // ==========================================
 
             return res.status(200).json({ success: true, message: "Payment verified successfully" });
         } else {
@@ -233,7 +225,7 @@ app.post('/api/verify-payment', async (req, res) => {
     }
 });
 
-// --- 4. 🚀 UPGRADED MARKETING PUSH NOTIFICATION API (AUTO-CHUNKING & DEAD TOKEN CLEANUP) ---
+// 🚀 MARKETING PUSH NOTIFICATION API
 app.post('/api/admin/send-offer', verifyAdmin, async (req, res) => {
     try {
         const { title, body, imageUrl } = req.body;
@@ -254,7 +246,6 @@ app.post('/api/admin/send-offer', verifyAdmin, async (req, res) => {
         let totalFailed = 0;
         const tokensToRemove = [];
 
-        // FIREBASE LIMIT: 500 tokens max per request. Array ko divide kar rahe hain.
         const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
         const tokenChunks = chunkArray(allTokens, 500);
 
@@ -266,15 +257,10 @@ app.post('/api/admin/send-offer', verifyAdmin, async (req, res) => {
             totalSuccess += response.successCount;
             totalFailed += response.failureCount;
 
-            // DEAD TOKENS DHOONDHO (Uninstalled / Revoked permission)
             if (response.failureCount > 0) {
                 response.responses.forEach((resp, idx) => {
                     if (!resp.success) {
                         const errorCode = resp.error.code;
-                        
-                        // 🚨 1. YAHAN PRINT HOGA TERA ASLI ERROR RENDER TERMINAL MEIN 🚨
-                        console.error(`🚨 FIREBASE REJECTED TOKEN [${chunk[idx]}]:`, errorCode, resp.error.message);
-
                         if (errorCode === 'messaging/invalid-registration-token' ||
                             errorCode === 'messaging/registration-token-not-registered') {
                             tokensToRemove.push(chunk[idx]);
@@ -284,29 +270,22 @@ app.post('/api/admin/send-offer', verifyAdmin, async (req, res) => {
             }
         }
 
-        // DATABASE SE DEAD TOKENS HATAO (Auto-Sweeper)
         if (tokensToRemove.length > 0) {
             const batch = db.batch();
             tokensToRemove.forEach(token => {
-                const tokenRef = db.collection('fcm_tokens').doc(token);
-                batch.delete(tokenRef);
+                batch.delete(db.collection('fcm_tokens').doc(token));
             });
-            
-            // 🚨 2. DEBUGGING KE LIYE DELETE WALI LINE COMMENT KAR DI HAI 🚨
-            // await batch.commit(); 
-            
-            console.log(`🧹 DEBUG MODE: Detected ${tokensToRemove.length} dead tokens, but DID NOT delete them.`);
+            await batch.commit(); 
         }
 
-        console.log(`✅ Push Sent! Success: ${totalSuccess}, Failed: ${totalFailed}`);
-        res.json({ success: true, message: `Notification sent to ${totalSuccess} users. (Found ${tokensToRemove.length} dead tokens, check logs)` });
+        res.json({ success: true, message: `Notification sent to ${totalSuccess} users.` });
 
     } catch (error) {
-        console.error('🔥 ACTUAL SYSTEM ERROR:', error);
         res.status(500).json({ success: false, error: "Internal Server Error." });
     }
 });
-// --- 5. INDIVIDUAL PUSH NOTIFICATION (ORDER TRACKING) ---
+
+// INDIVIDUAL PUSH NOTIFICATION (ORDER TRACKING)
 app.post('/api/admin/update-tracking', verifyAdmin, async (req, res) => {
     try {
         const { orderId, trackingUrl } = req.body;
@@ -347,7 +326,6 @@ app.post('/api/admin/update-tracking', verifyAdmin, async (req, res) => {
                 
                 const response = await admin.messaging().sendEachForMulticast(message);
                 
-                // Track update API me bhi dead token cleanup laga diya hai
                 const tokensToRemove = [];
                 if (response.failureCount > 0) {
                     response.responses.forEach((resp, idx) => {
@@ -366,7 +344,6 @@ app.post('/api/admin/update-tracking', verifyAdmin, async (req, res) => {
         
         res.json({ success: true, message: "Order updated & Notification check complete!" });
     } catch (error) {
-        console.error('🔥 Error:', error);
         res.status(500).json({ success: false, error: "Server Error" });
     }
 });
