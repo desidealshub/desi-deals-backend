@@ -29,15 +29,27 @@ try {
 const db = admin.firestore();
 const app = express();
 
+// ==========================================
+// --- SECURITY & MIDDLEWARE CONFIGURATION ---
+// ==========================================
+
+// HELMET (Basic security headers setup)
+const helmet = require('helmet');
+app.use(helmet());
+
+// CORS (Cross-origin rules)
 app.use(cors({
     origin: ['https://desidealshub.com', 'http://localhost:3000'],
     methods: ['GET', 'POST']
 }));
-app.use(express.json());
 
+// 🚨 PAYLOAD LIMITER (Replaced plain express.json() to prevent DoS attacks) 🚨
+app.use(express.json({ limit: '10kb' }));
+app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+
+// ANTI-DDOS / SPAM GUARD (Rate Limiter)
 const rateLimit = require('express-rate-limit');
 
-// 🚨 ANTI-DDOS / SPAM GUARD
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, 
     max: 50, 
